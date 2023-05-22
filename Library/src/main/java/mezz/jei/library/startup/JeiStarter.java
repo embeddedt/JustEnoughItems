@@ -217,7 +217,8 @@ public final class JeiStarter {
 
 		pluginCaller.callOnPlugins(
 			"Sending Runtime",
-			p -> p.onRuntimeAvailable(jeiRuntime)
+			p -> p.onRuntimeAvailable(jeiRuntime),
+			false // plugins misbehave if async
 		);
 		pluginCaller.callOnRuntimePlugin(
 			"Sending Runtime to Runtime Plugin",
@@ -236,7 +237,8 @@ public final class JeiStarter {
 		}
 		pluginCaller.callOnPlugins(
 			"Sending Runtime Unavailable",
-			IModPlugin::onRuntimeUnavailable
+			IModPlugin::onRuntimeUnavailable,
+			false // for consistency, see above
 		);
 		pluginCaller.callOnRuntimePlugin(
 			"Sending Runtime Unavailable to Runtime Plugin",

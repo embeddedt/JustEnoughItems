@@ -33,12 +33,13 @@ public class PluginCaller {
 		this.clientExecutor = clientExecutor;
 	}
 
-	private <T> void callSync(
+	private <T> void callMulti(
 		String title,
 		PluginCallerTimer timer,
 		List<T> plugins,
 		Function<T, ResourceLocation> uidFunc,
-		Consumer<T> func
+		Consumer<T> func,
+		boolean async
 	) {
 		Set<T> erroredPlugins = ConcurrentHashMap.newKeySet();
 		Stream<Runnable> runnables = plugins.stream()
@@ -59,26 +60,38 @@ public class PluginCaller {
 				};
 			});
 
-		clientExecutor.runAsync(runnables);
+		if(async)
+			runnables.forEach(Runnable::run);
+		else
+			clientExecutor.runAsync(runnables);
 
 		plugins.removeAll(erroredPlugins);
 	}
 
 	public void callOnPlugins(
+			String title,
+			Consumer<IModPlugin> func
+	) {
+		callOnPlugins(title, func, true);
+	}
+
+	public void callOnPlugins(
 		String title,
-		Consumer<IModPlugin> func
+		Consumer<IModPlugin> func,
+		boolean async
 	) {
 		JeiStartTask.interruptIfCanceled();
 		LOGGER.info("{}...", title);
 		Stopwatch stopwatch = Stopwatch.createStarted();
 
 		try (PluginCallerTimer timer = new PluginCallerTimer()) {
-			callSync(
+			callMulti(
 				title,
 				timer,
 				plugins,
 				IModPlugin::getPluginUid,
-				func
+				func,
+				async
 			);
 		}
 
