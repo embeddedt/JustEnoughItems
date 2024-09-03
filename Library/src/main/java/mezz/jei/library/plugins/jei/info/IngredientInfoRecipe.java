@@ -28,7 +28,7 @@ public class IngredientInfoRecipe implements IJeiIngredientInfoRecipe {
 			.toList();
 
 		List<FormattedText> descriptionLines = StringUtil.expandNewlines(descriptionComponents);
-		return new IngredientInfoRecipe(typedIngredients, descriptionLines);
+		return new IngredientInfoRecipe(typedIngredients, List.copyOf(descriptionLines));
 	}
 
 	private IngredientInfoRecipe(List<ITypedIngredient<?>> ingredients, List<FormattedText> description) {
