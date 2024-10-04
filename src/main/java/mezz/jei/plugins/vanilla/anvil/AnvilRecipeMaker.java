@@ -5,7 +5,10 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
+import com.google.common.collect.ImmutableList;
 import net.minecraft.item.ArmorMaterial;
 import net.minecraft.item.ItemTier;
 import net.minecraft.item.crafting.Ingredient;
@@ -38,6 +41,45 @@ public final class AnvilRecipeMaker {
 	private AnvilRecipeMaker() {
 	}
 
+	private static final class EnchantmentData {
+		private final Enchantment enchantment;
+		private final List<ItemStack> enchantedBooks;
+
+		private EnchantmentData(Enchantment enchantment) {
+			this.enchantment = enchantment;
+			this.enchantedBooks = getEnchantedBooks(enchantment);
+		}
+
+		public List<ItemStack> getEnchantedBooks(ItemStack ingredient) {
+			List<ItemStack> list = enchantedBooks.stream()
+					.filter(enchantedBook -> ingredient.isBookEnchantable(enchantedBook))
+					.collect(ImmutableList.toImmutableList());
+			// avoid using copy of list if it contains the exact same items
+			return list.size() == enchantedBooks.size() ? enchantedBooks : list;
+		}
+
+		private boolean canEnchant(ItemStack ingredient) {
+			try {
+				return enchantment.canEnchant(ingredient);
+			} catch (RuntimeException e) {
+				String stackInfo = ErrorUtil.getItemStackInfo(ingredient);
+				LOGGER.error("Failed to check if ingredient can be enchanted: {}", stackInfo, e);
+				return false;
+			}
+		}
+
+		private static List<ItemStack> getEnchantedBooks(Enchantment enchantment) {
+			return IntStream.rangeClosed(1, enchantment.getMaxLevel())
+					.mapToObj(level -> {
+						ItemStack bookEnchant = ENCHANTED_BOOK.copy();
+						EnchantmentHelper.setEnchantments(Collections.singletonMap(enchantment, level), bookEnchant);
+						return bookEnchant;
+					})
+					.collect(ImmutableList.toImmutableList());
+		}
+	}
+
+
 	public static List<Object> getAnvilRecipes(IVanillaRecipeFactory vanillaRecipeFactory, IIngredientManager ingredientManager) {
 		List<Object> recipes = new ArrayList<>();
 		Stopwatch sw = Stopwatch.createStarted();
@@ -61,11 +103,11 @@ public final class AnvilRecipeMaker {
 	}
 
 	private static void getBookEnchantmentRecipes(List<Object> recipes, IVanillaRecipeFactory vanillaRecipeFactory, IIngredientManager ingredientManager) {
+		List<EnchantmentData> enchantmentDatas = ForgeRegistries.ENCHANTMENTS.getValues().stream().map(EnchantmentData::new).collect(Collectors.toList());
 		Collection<ItemStack> ingredients = ingredientManager.getAllIngredients(VanillaTypes.ITEM);
-		Collection<Enchantment> enchantments = ForgeRegistries.ENCHANTMENTS.getValues();
 		for (ItemStack ingredient : ingredients) {
 			if (ingredient.isEnchantable()) {
-				for (Enchantment enchantment : enchantments) {
+				for (EnchantmentData enchantment : enchantmentDatas) {
 					if (enchantment.canEnchant(ingredient)) {
 						try {
 							getBookEnchantmentRecipes(recipes, vanillaRecipeFactory, enchantment, ingredient);
@@ -79,24 +121,14 @@ public final class AnvilRecipeMaker {
 		}
 	}
 
-	private static void getBookEnchantmentRecipes(List<Object> recipes, IVanillaRecipeFactory vanillaRecipeFactory, Enchantment enchantment, ItemStack ingredient) {
-		Item item = ingredient.getItem();
-		List<ItemStack> perLevelBooks = Lists.newArrayList();
-		List<ItemStack> perLevelOutputs = Lists.newArrayList();
-		for (int level = 1; level <= enchantment.getMaxLevel(); level++) {
-			Map<Enchantment, Integer> enchMap = Collections.singletonMap(enchantment, level);
-
-			ItemStack bookEnchant = ENCHANTED_BOOK.copy();
-			EnchantmentHelper.setEnchantments(enchMap, bookEnchant);
-			if (item.isBookEnchantable(ingredient, bookEnchant)) {
-				perLevelBooks.add(bookEnchant);
-
-				ItemStack withEnchant = ingredient.copy();
-				EnchantmentHelper.setEnchantments(enchMap, withEnchant);
-				perLevelOutputs.add(withEnchant);
-			}
-		}
-		if (!perLevelBooks.isEmpty() && !perLevelOutputs.isEmpty()) {
+	private static void getBookEnchantmentRecipes(List<Object> recipes, IVanillaRecipeFactory vanillaRecipeFactory, EnchantmentData enchantment, ItemStack ingredient) {
+		List<ItemStack> perLevelBooks = enchantment.getEnchantedBooks(ingredient);
+		if (!perLevelBooks.isEmpty()) {
+			List<ItemStack> perLevelOutputs = Lists.transform(perLevelBooks, book -> {
+				ItemStack enchantedIngredient = ingredient.copy();
+				EnchantmentHelper.setEnchantments(EnchantmentHelper.getEnchantments(book), enchantedIngredient);
+				return enchantedIngredient;
+			});
 			Object anvilRecipe = vanillaRecipeFactory.createAnvilRecipe(ingredient, perLevelBooks, perLevelOutputs);
 			recipes.add(anvilRecipe);
 		}
