@@ -1,5 +1,8 @@
 package mezz.jei.load.registration;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.IdentityHashMap;
 import java.util.Map;
 
@@ -17,6 +20,8 @@ import mezz.jei.util.ErrorUtil;
 import net.minecraftforge.fluids.FluidStack;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+
+import javax.annotation.Nullable;
 
 public class SubtypeRegistration implements ISubtypeRegistration {
 	private static final Logger LOGGER = LogManager.getLogger();
@@ -94,8 +99,33 @@ public class SubtypeRegistration implements ISubtypeRegistration {
 		return ImmutableMap.copyOf(fluidInterpreters);
 	}
 
+	private static final ThreadLocal<MessageDigest> DIGEST = ThreadLocal.withInitial(() -> {
+		try {
+			return MessageDigest.getInstance("SHA-1");
+		} catch (NoSuchAlgorithmException e) {
+			throw new AssertionError(e);
+		}
+	});
+
+	private static String stringifyOrHashNbt(@Nullable CompoundNBT nbtTagCompound) {
+		if (nbtTagCompound == null || nbtTagCompound.isEmpty()) {
+			return IIngredientSubtypeInterpreter.NONE;
+		}
+		String key = nbtTagCompound.toString();
+		if(key.length() <= 20) {
+			return key;
+		} else {
+			MessageDigest digest = DIGEST.get();
+			digest.reset();
+			byte[] hash = digest.digest(key.getBytes(StandardCharsets.UTF_8));
+			return new String(hash, 0, Math.min(hash.length, 10), StandardCharsets.UTF_8);
+		}
+	}
+
 	private static class AllNbt implements IIngredientSubtypeInterpreter<ItemStack> {
 		public static final AllNbt INSTANCE = new AllNbt();
+
+
 
 		private AllNbt() {
 		}
@@ -103,10 +133,7 @@ public class SubtypeRegistration implements ISubtypeRegistration {
 		@Override
 		public String apply(ItemStack itemStack, UidContext context) {
 			CompoundNBT nbtTagCompound = itemStack.getTag();
-			if (nbtTagCompound == null || nbtTagCompound.isEmpty()) {
-				return IIngredientSubtypeInterpreter.NONE;
-			}
-			return nbtTagCompound.toString();
+			return stringifyOrHashNbt(nbtTagCompound);
 		}
 	}
 
@@ -119,10 +146,7 @@ public class SubtypeRegistration implements ISubtypeRegistration {
 		@Override
 		public String apply(FluidStack fluidStack, UidContext context) {
 			CompoundNBT nbtTagCompound = fluidStack.getTag();
-			if (nbtTagCompound == null || nbtTagCompound.isEmpty()) {
-				return IIngredientSubtypeInterpreter.NONE;
-			}
-			return nbtTagCompound.toString();
+			return stringifyOrHashNbt(nbtTagCompound);
 		}
 	}
 }
