@@ -15,16 +15,18 @@
  */
 package mezz.jei.search.suffixtree;
 
+
 import mezz.jei.search.ISearchStorage;
 import mezz.jei.util.Pair;
 import mezz.jei.util.SubString;
 
 import javax.annotation.Nullable;
+import java.io.PrintWriter;
 import java.util.Set;
 
 /**
  * A Generalized Suffix Tree, based on the Ukkonen's paper "On-line construction of suffix trees"
- * <a href="http://www.cs.helsinki.fi/u/ukkonen/SuffixT1withFigs.pdf">On-line construction of suffix trees</a>
+ * http://www.cs.helsinki.fi/u/ukkonen/SuffixT1withFigs.pdf
  * <p>
  * Allows for fast storage and fast(er) retrieval by creating a tree-based index out of a set of strings.
  * Unlike common suffix trees, which are generally used to build an index out of one (very) long string,
@@ -79,7 +81,7 @@ public class GeneralizedSuffixTree<T> implements ISearchStorage<T> {
 	 * supplied as input.
 	 *
 	 * @param word the key to search for
-	 * @param results the indexes associated with the input <tt>word</tt>
+	 * @param results accepts the results data
 	 */
 	@Override
 	public void getSearchResults(String word, Set<T> results) {
@@ -88,19 +90,19 @@ public class GeneralizedSuffixTree<T> implements ISearchStorage<T> {
 			return;
 		}
 
-		tmpNode.getData(results);
+		tmpNode.getData(results::addAll);
 	}
 
 	@Override
-	public void getAllElements(Set<T> results) {
-		root.getData(results);
+	public void getAllElements(Set<T> resultsConsumer) {
+		root.getData(resultsConsumer::addAll);
 	}
 
 	/**
 	 * Verifies if exists a path from the root to a node such that the concatenation
 	 * of all the labels on the path is a superstring of the given word.
 	 * If such a path is found, the last node on it is returned.
-	 * <p>
+	 *
 	 * Returns the tree node (if present) that corresponds to the given string.
 	 */
 	@Nullable
@@ -110,7 +112,7 @@ public class GeneralizedSuffixTree<T> implements ISearchStorage<T> {
 
 		while (!wordSubString.isEmpty()) {
 			// follow the edge corresponding to this char
-			Edge<T> currentEdge = currentNode.getEdge(wordSubString);
+			Node<T> currentEdge = currentNode.getEdge(wordSubString);
 			if (currentEdge == null) {
 				// there is no edge starting with this char
 				return null;
@@ -123,11 +125,11 @@ public class GeneralizedSuffixTree<T> implements ISearchStorage<T> {
 			}
 			if (lenToMatch == wordSubString.length()) {
 				// we found the edge we're looking for
-				return currentEdge.getDest();
+				return currentEdge;
 			}
 
 			// advance to next node
-			currentNode = currentEdge.getDest();
+			currentNode = currentEdge;
 			wordSubString = wordSubString.substring(lenToMatch);
 		}
 
@@ -147,12 +149,13 @@ public class GeneralizedSuffixTree<T> implements ISearchStorage<T> {
 
 		Node<T> s = root;
 
+		final SubString keyString = new SubString(key);
 		// proceed with tree construction (closely related to procedure in Ukkonen's paper)
-		SubString text = new SubString(key, 0, 0);
+		SubString text = keyString.shorten(keyString.length());
 		// iterate over the string, one char at a time
-		for (int i = 0; i < key.length(); i++) {
+		for (int i = 0; i < keyString.length(); i++) {
 			// line 6, line 7: update the tree with the new transitions due to this new char
-			SubString rest = new SubString(key, i);
+			SubString rest = keyString.substring(i);
 			Pair<Node<T>, SubString> active = update(s, text, key.charAt(i), rest, value);
 
 			s = active.first();
@@ -185,11 +188,11 @@ public class GeneralizedSuffixTree<T> implements ISearchStorage<T> {
 	 * the last node that can be reached by following the path denoted by stringPart starting from inputNode
 	 */
 	private static <T> Pair<Boolean, Node<T>> testAndSplit(
-		Node<T> startNode,
-		SubString searchString,
-		final char t,
-		final SubString remainder,
-		final T value
+			Node<T> startNode,
+			SubString searchString,
+			final char t,
+			final SubString remainder,
+			final T value
 	) {
 		assert !remainder.isEmpty();
 		assert remainder.charAt(0) == t;
@@ -200,7 +203,7 @@ public class GeneralizedSuffixTree<T> implements ISearchStorage<T> {
 		searchString = canonizeResult.second();
 
 		if (!searchString.isEmpty()) {
-			Edge<T> g = startNode.getEdge(searchString);
+			Node<T> g = startNode.getEdge(searchString);
 			assert g != null;
 			// must see whether "searchString" is substring of the label of an edge
 			if (g.length() > searchString.length() && g.charAt(searchString.length()) == t) {
@@ -210,7 +213,7 @@ public class GeneralizedSuffixTree<T> implements ISearchStorage<T> {
 			return new Pair<>(false, newNode);
 		}
 
-		Edge<T> e = startNode.getEdge(remainder);
+		Node<T> e = startNode.getEdge(remainder);
 		if (e == null) {
 			// if there is no t-transition from s
 			return new Pair<>(false, startNode);
@@ -219,8 +222,7 @@ public class GeneralizedSuffixTree<T> implements ISearchStorage<T> {
 		if (e.startsWith(remainder)) {
 			if (e.length() == remainder.length()) {
 				// update payload of destination node
-				Node<T> dest = e.getDest();
-				dest.addRef(value);
+				e.addRef(value);
 				return new Pair<>(true, startNode);
 			} else {
 				Node<T> newNode = splitNode(startNode, e, remainder);
@@ -232,7 +234,7 @@ public class GeneralizedSuffixTree<T> implements ISearchStorage<T> {
 		}
 	}
 
-	private static <T> Node<T> splitNode(Node<T> s, Edge<T> e, SubString splitFirstPart) {
+	private static <T> Node<T> splitNode(Node<T> s, Node<T> e, SubString splitFirstPart) {
 		assert e == s.getEdge(splitFirstPart);
 		assert e.startsWith(splitFirstPart);
 		assert e.length() > splitFirstPart.length();
@@ -241,11 +243,12 @@ public class GeneralizedSuffixTree<T> implements ISearchStorage<T> {
 		SubString splitSecondPart = e.substring(splitFirstPart.length());
 
 		// build a new node r in between s and e.dest
-		Node<T> r = new Node<>();
+		Node<T> r = new Node<>(splitFirstPart);
 		// replace e with new first part pointing to r
-		s.addEdge(new Edge<>(splitFirstPart, r));
+		s.addEdge(r);
 		// r is the new node sitting in between s and the original destination
-		r.addEdge(new Edge<>(splitSecondPart, e.getDest()));
+		e.set(splitSecondPart);
+		r.addEdge(e);
 
 		return r;
 	}
@@ -256,16 +259,18 @@ public class GeneralizedSuffixTree<T> implements ISearchStorage<T> {
 	 * a prefix of input and remainder will be string that must be
 	 * appended to the concatenation of labels from s to n to get input.
 	 */
-	private static <T> Pair<Node<T>, SubString> canonize(Node<T> currentNode, final SubString input) {
+	private static <T> Pair<Node<T>, SubString> canonize(final Node<T> s, final SubString input) {
+		Node<T> currentNode = s;
+
 		// descend the tree as long as a proper label is found
 		SubString remainder = input;
 
 		while (!remainder.isEmpty()) {
-			Edge<T> nextEdge = currentNode.getEdge(remainder);
+			Node<T> nextEdge = currentNode.getEdge(remainder);
 			if (nextEdge == null || !nextEdge.isPrefix(remainder)) {
 				break;
 			}
-			currentNode = nextEdge.getDest();
+			currentNode = nextEdge;
 			remainder = remainder.substring(nextEdge.length());
 		}
 
@@ -289,11 +294,11 @@ public class GeneralizedSuffixTree<T> implements ISearchStorage<T> {
 	 * @param value      the value to add
 	 */
 	private Pair<Node<T>, SubString> update(
-		Node<T> s,
-		final SubString stringPart,
-		final char newChar,
-		final SubString rest,
-		final T value
+			Node<T> s,
+			final SubString stringPart,
+			final char newChar,
+			final SubString rest,
+			final T value
 	) {
 		assert !rest.isEmpty();
 		assert rest.charAt(0) == newChar;
@@ -312,16 +317,16 @@ public class GeneralizedSuffixTree<T> implements ISearchStorage<T> {
 		// line 2
 		while (!endpoint) {
 			// line 3
-			Edge<T> tempEdge = r.getEdge(newChar);
+			Node<T> tempEdge = r.getEdge(newChar);
 			if (tempEdge != null) {
 				// such a node is already present. This is one of the main differences from Ukkonen's case:
 				// the tree can contain deeper nodes at this stage because different strings were added by previous iterations.
-				leaf = tempEdge.getDest();
+				leaf = tempEdge;
 			} else {
 				// must build a new leaf
-				leaf = new Node<>();
+				leaf = new Node<>(rest);
 				leaf.addRef(value);
-				r.addEdge(new Edge<>(rest, leaf));
+				r.addEdge(leaf);
 			}
 
 			// update suffix link for newly created leaf
@@ -366,7 +371,7 @@ public class GeneralizedSuffixTree<T> implements ISearchStorage<T> {
 	}
 
 	private static SubString safeCutLastChar(SubString subString) {
-		if (subString.length() == 0) {
+		if (subString.isEmpty()) {
 			return subString;
 		}
 		return subString.shorten(1);
@@ -375,7 +380,16 @@ public class GeneralizedSuffixTree<T> implements ISearchStorage<T> {
 	@Override
 	public String statistics() {
 		return "GeneralizedSuffixTree:" +
-			"\nNode size stats: \n" + this.root.nodeSizeStats() +
-			"\nNode edge stats: \n" + this.root.nodeEdgeStats();
+				"\nNode size stats: \n" + this.root.nodeSizeStats() +
+				"\nNode edge stats: \n" + this.root.nodeEdgeStats();
+	}
+
+	/**
+	 * Print the tree for use by graphviz.
+	 * To view, run the command: `dot -Tpng -O <filename>.dot`
+	 */
+	@SuppressWarnings("unused") // used for debugging
+	public void printTree(PrintWriter out, boolean includeSuffixLinks) {
+		root.printTree(out, includeSuffixLinks);
 	}
 }
